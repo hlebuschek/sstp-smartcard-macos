@@ -8,6 +8,7 @@ an ordinary process, at the cost of needing root.
 from __future__ import annotations
 
 import fcntl
+import ipaddress
 import json
 import os
 import socket
@@ -111,6 +112,14 @@ def _output(command: list[str]) -> str:
     return result.stdout if result.returncode == 0 else ""
 
 
+def _is_address(value: str) -> bool:
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
+
+
 def configure_interface(name: str, local: str, peer: str, mtu: int) -> None:
     _run(["ifconfig", name, "inet", local, peer, "netmask", "255.255.255.255", "up"])
     _run(["ifconfig", name, "mtu", str(mtu)])
@@ -190,16 +199,16 @@ def redirect_default(interface: str, peer: str, server_address: str) -> Routes:
 class Resolver:
     """Points macOS DNS at the tunnel's servers, restoring the previous state.
 
-    Two modes. By default every active network service is pointed at the
+    Two modes. Without domains every active network service is pointed at the
     tunnel's servers, which is what the Windows client does and what makes
-    corporate names resolve whatever suffix they carry. Naming domains
-    explicitly switches to per-domain resolver files, which leaves the rest of
-    the internet resolving as before at the cost of having to know every
-    corporate suffix in advance.
+    corporate names resolve whatever suffix they carry. Naming domains switches
+    to per-domain resolver files, which leaves the rest of the internet
+    resolving as before at the cost of having to know every corporate suffix in
+    advance.
     """
 
     def __init__(self):
-        self._services: list[tuple[str, list[str]]] = []
+        self._services: list[dict] = []
         self._files: list[str] = []
 
     def apply(self, servers: list[str], domains: list[str] | None = None) -> None:
@@ -219,12 +228,11 @@ class Resolver:
             # permanent, one run cementing the last one's leftovers.
             if previous == servers:
                 previous = []
-            try:
-                _run(["networksetup", "-setdnsservers", service] + servers)
-            except NetworkError as exc:
-                logger.debug("cannot set DNS for %r: %s", service, exc)
+            if not self._set(service, servers):
                 continue
-            self._services.append((service, previous))
+            self._services.append(
+                {"service": service, "previous": previous, "applied": list(servers)}
+            )
         if self._services:
             logger.info("DNS servers set to %s", ", ".join(servers))
 
@@ -259,14 +267,48 @@ class Resolver:
             except OSError as exc:
                 logger.warning("cannot remove %s: %s", path, exc)
         self._files.clear()
-        for service, previous in self._services:
-            arguments = previous if previous else ["empty"]
-            subprocess.run(
-                ["networksetup", "-setdnsservers", service] + arguments,
-                capture_output=True,
-            )
+        for entry in self._services:
+            self._restore_service(entry)
         self._services.clear()
         self._flush()
+
+    @classmethod
+    def _restore_service(cls, entry: dict) -> None:
+        service = entry.get("service", "")
+        applied = entry.get("applied", [])
+        previous = entry.get("previous", [])
+        current = cls._current(service)
+        # Another VPN client may have taken the service over while this tunnel
+        # was up. Putting our idea of "previous" back would undo its work.
+        if applied and current != applied:
+            logger.info(
+                "DNS for %r is now %s, not what this tunnel set; leaving it alone",
+                service, ", ".join(current) or "automatic",
+            )
+            return
+        if cls._set(service, previous):
+            logger.info(
+                "DNS for %r restored to %s", service, ", ".join(previous) or "automatic"
+            )
+        elif previous and cls._set(service, []):
+            # The tunnel's servers resolve nothing once it is down, so falling
+            # back to the DHCP defaults beats leaving them in place.
+            logger.warning("DNS for %r reset to automatic", service)
+
+    @staticmethod
+    def _set(service: str, servers: list[str]) -> bool:
+        result = subprocess.run(
+            ["networksetup", "-setdnsservers", service] + (servers or ["empty"]),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            logger.error(
+                "cannot set DNS for %r: %s",
+                service, result.stderr.strip() or result.stdout.strip(),
+            )
+            return False
+        return True
 
     @staticmethod
     def _flush() -> None:
@@ -276,16 +318,14 @@ class Resolver:
     @property
     def state(self) -> dict:
         return {
-            "services": [[service, list(previous)] for service, previous in self._services],
+            "services": [dict(entry) for entry in self._services],
             "files": list(self._files),
         }
 
     @classmethod
     def from_state(cls, entries: dict) -> "Resolver":
         resolver = cls()
-        resolver._services = [
-            (service, list(previous)) for service, previous in entries.get("services", [])
-        ]
+        resolver._services = [dict(entry) for entry in entries.get("services", [])]
         resolver._files = list(entries.get("files", []))
         return resolver
 
@@ -313,8 +353,12 @@ class Resolver:
 
     @staticmethod
     def _current(service: str) -> list[str]:
+        # A service with no servers of its own answers with a sentence, not an
+        # empty list ("There aren't any DNS Servers set on Wi-Fi."). Restoring
+        # those words as if they were servers leaves the machine with a
+        # resolver that cannot answer anything.
         output = _output(["networksetup", "-getdnsservers", service]).split()
-        return [] if not output or "any" in output[0].lower() else output
+        return [word for word in output if _is_address(word)]
 
 
 def save_state(interface: str, server: str, routes: Routes, resolver: Resolver | None) -> None:

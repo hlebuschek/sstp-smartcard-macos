@@ -290,7 +290,7 @@ class Session:
                 for server in self.ipcp.dns_servers:
                     self.routes.add_host(server, interface=name)
             self.resolver = net.Resolver()
-            self.resolver.apply(self.ipcp.dns_servers, self.config.dns_domains)
+            self.resolver.apply(self.ipcp.dns_servers, self._dns_domains())
 
         net.save_state(name, self.transport.host, self.routes, self.resolver)
 
@@ -310,6 +310,28 @@ class Session:
             peer=peer,
             dns=list(self.ipcp.dns_servers),
         )
+
+    def _dns_domains(self) -> list[str]:
+        """Which names the tunnel's DNS servers should answer for.
+
+        Handing them every lookup is right only when the tunnel also carries
+        every route. In a split tunnel the rest of the internet still leaves
+        through the physical link, and corporate servers that cannot reach it
+        would take the whole machine's name resolution down with them, so the
+        UPN's domain is used to keep the takeover to corporate names.
+        """
+        if self.config.dns_domains or self.config.default_route:
+            return list(self.config.dns_domains)
+        domain = (self.identity.principal_name() or "").rpartition("@")[2]
+        domain = domain.strip(". ").lower()
+        if not domain:
+            logger.warning(
+                "no domain in the certificate's UPN: sending every lookup to %s; "
+                "name a domain explicitly to keep public names on the local DNS",
+                ", ".join(self.ipcp.dns_servers),
+            )
+            return []
+        return [domain]
 
     def _safely(self, description: str, action) -> None:
         """Run one teardown step; a failure must not strand the others.

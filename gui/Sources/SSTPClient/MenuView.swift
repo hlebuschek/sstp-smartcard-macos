@@ -189,7 +189,7 @@ struct MenuView: View {
                                 .textFieldStyle(.roundedBorder)
                         }
                         LabeledContent("Домены") {
-                            TextField("весь DNS через VPN", text: $model.profile.dnsDomains)
+                            TextField("домен из UPN сертификата", text: $model.profile.dnsDomains)
                                 .textFieldStyle(.roundedBorder)
                         }
                         if model.profile.routes.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -199,10 +199,10 @@ struct MenuView: View {
                                 .foregroundStyle(.orange)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        Text("Через туннель идут только эти сети. Домены можно не "
-                             + "заполнять: тогда все имена разрешаются корпоративным "
-                             + "DNS, как в Windows. Список доменов оставит на нём "
-                             + "только их.")
+                        Text("Через туннель идут только эти сети. На корпоративный "
+                             + "DNS уходят имена перечисленных доменов, остальной "
+                             + "интернет резолвится как раньше. Если поле пустое, "
+                             + "берётся домен из UPN сертификата.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)

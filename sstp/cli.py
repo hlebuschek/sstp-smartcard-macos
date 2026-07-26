@@ -439,7 +439,8 @@ def main(argv=None) -> int:
         "--dns-domain",
         action="append",
         help="resolve only this domain through the tunnel (repeatable); "
-        "by default every lookup goes to the tunnel's DNS servers",
+        "defaults to the UPN's domain in a split tunnel, and to every lookup "
+        "when the tunnel carries the default route",
     )
     _add_token_arguments(connect)
     connect.set_defaults(handler=command_connect)
