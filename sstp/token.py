@@ -25,8 +25,10 @@ KNOWN_MODULES = (
     "/usr/local/lib/pkcs11/libeTPkcs11.dylib",
     "/usr/local/lib/pkcs11/libIDPrimePKCS11.dylib",
     "/usr/local/lib/pkcs11/libClassicClientPKCS11.dylib",
-    "/usr/local/lib/librtpkcs11ecp.dylib",
+    # JaCarta Unified Client; JaCarta PKI cards answer only to this module.
+    "/Library/Frameworks/jcPKCS11-2.framework/jcPKCS11-2",
     "/usr/local/lib/libjcPKCS11.dylib",
+    "/usr/local/lib/librtpkcs11ecp.dylib",
     "/opt/homebrew/lib/pkcs11/opensc-pkcs11.so",
     "/usr/local/lib/pkcs11/opensc-pkcs11.so",
 )
@@ -180,23 +182,52 @@ def discover_modules() -> list[str]:
 
 class Token:
     def __init__(self, module_path: str | None = None):
-        if module_path is None:
-            found = discover_modules()
-            if not found:
-                raise TokenError(
-                    "PKCS#11 module not found. Install the card middleware "
-                    "or pass --pkcs11-module explicitly."
-                )
-            module_path = found[0]
-        self.module_path = module_path
         self._lib = PyKCS11.PyKCS11Lib()
+        self._session = None
+        self.info: TokenInfo | None = None
+        if module_path is None:
+            module_path = self._autodetect()
+        else:
+            self._load(module_path)
+        self.module_path = module_path
+        logger.debug("loaded PKCS#11 module %s", module_path)
+
+    def _load(self, module_path: str) -> None:
         try:
             self._lib.load(module_path)
         except PyKCS11.PyKCS11Error as exc:
             raise TokenError(f"cannot load {module_path}: {exc}") from exc
-        self._session = None
-        self.info: TokenInfo | None = None
-        logger.debug("loaded PKCS#11 module %s", module_path)
+
+    def _autodetect(self) -> str:
+        """Pick the module that answers for the card that is actually inserted.
+
+        Several middlewares can be installed side by side, and each one only
+        speaks to its own cards: SafeNet reports no slots for a JaCarta PKI card
+        and vice versa. Taking the first installed module would fail with "no
+        token present" while a perfectly readable card sits in the reader.
+        """
+        found = discover_modules()
+        if not found:
+            raise TokenError(
+                "PKCS#11 module not found. Install the card middleware "
+                "or pass --pkcs11-module explicitly."
+            )
+        fallback = None
+        for path in found:
+            try:
+                self._load(path)
+                if self._lib.getSlotList(tokenPresent=True):
+                    return path
+            except (TokenError, PyKCS11.PyKCS11Error):
+                logger.debug("PKCS#11 module %s is unusable, skipping", path)
+                continue
+            if fallback is None:
+                fallback = path
+        if fallback is None:
+            raise TokenError("no installed PKCS#11 module could be loaded")
+        # No card anywhere; open() will report it with the usual wording.
+        self._load(fallback)
+        return fallback
 
     def slots(self) -> list[TokenInfo]:
         result = []

@@ -58,6 +58,7 @@ struct Profile: Codable, Identifiable, Hashable {
 }
 
 struct TokenDescription: Decodable, Identifiable, Hashable {
+    let module: String
     let slot: Int
     let label: String
     let serial: String
@@ -66,7 +67,9 @@ struct TokenDescription: Decodable, Identifiable, Hashable {
     let pinCountLow: Bool
     let certificates: [CertificateInfo]
 
-    var id: Int { slot }
+    // Slot numbers are only unique within one middleware, and two of them can
+    // report cards at the same time.
+    var id: String { "\(module)#\(slot)" }
 
     /// The card also carries e-mail and signing certificates; the server would
     /// reject those, so only the usable ones are offered.

@@ -15,7 +15,7 @@ import time
 
 from . import ipc, log, net
 from .session import Config, Session
-from .token import Token, TokenError
+from .token import Token, TokenError, discover_modules
 
 logger = log.get("daemon")
 
@@ -93,31 +93,45 @@ class Daemon:
         return {"ok": True, "status": self._status()}
 
     def _command_tokens(self, request: dict) -> dict:
-        try:
-            token = Token(request.get("module"))
-        except TokenError as exc:
-            return {"ok": False, "error": str(exc)}
+        # Every installed middleware is asked, because each one only sees its
+        # own cards and the user may plug in either.
+        wanted = request.get("module")
+        modules = [wanted] if wanted else discover_modules()
+        if not modules:
+            return {"ok": False, "error": "no PKCS#11 module is installed"}
         tokens = []
-        try:
-            for info in token.slots():
-                token.open(slot=info.slot)
-                tokens.append(
-                    {
-                        "slot": info.slot,
-                        "label": info.label,
-                        "serial": info.serial,
-                        "pin_locked": info.pin_locked,
-                        "pin_final_try": info.pin_final_try,
-                        "pin_count_low": info.pin_count_low,
-                        "certificates": [_describe(c) for c in token.certificates()],
-                    }
-                )
+        errors = []
+        for path in modules:
+            try:
+                token = Token(path)
+            except TokenError as exc:
+                errors.append(str(exc))
+                continue
+            try:
+                for info in token.slots():
+                    token.open(slot=info.slot)
+                    tokens.append(
+                        {
+                            "module": path,
+                            "slot": info.slot,
+                            "label": info.label,
+                            "serial": info.serial,
+                            "pin_locked": info.pin_locked,
+                            "pin_final_try": info.pin_final_try,
+                            "pin_count_low": info.pin_count_low,
+                            "certificates": [
+                                _describe(c) for c in token.certificates()
+                            ],
+                        }
+                    )
+                    token.close()
+            except TokenError as exc:
+                errors.append(str(exc))
+            finally:
                 token.close()
-        except TokenError as exc:
-            return {"ok": False, "error": str(exc)}
-        finally:
-            token.close()
-        return {"ok": True, "module": token.module_path, "tokens": tokens}
+        if not tokens and errors:
+            return {"ok": False, "error": "; ".join(dict.fromkeys(errors))}
+        return {"ok": True, "tokens": tokens}
 
     def _command_connect(self, request: dict) -> dict:
         with self._lock:

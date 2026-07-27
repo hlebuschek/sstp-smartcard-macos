@@ -198,6 +198,7 @@ final class TunnelModel: ObservableObject {
         var request: [String: Any] = [
             "server": profile.server.trimmingCharacters(in: .whitespaces),
             "pin": pin,
+            "module": token.module,
             "slot": token.slot,
             "ckaid": certificate.ckaid,
             "default_route": profile.defaultRoute,

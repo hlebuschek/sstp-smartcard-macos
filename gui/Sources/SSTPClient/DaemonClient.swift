@@ -140,7 +140,6 @@ private struct StatusReply: Decodable {
 }
 
 private struct TokensReply: Decodable {
-    let module: String?
     let tokens: [TokenDescription]
 }
 
