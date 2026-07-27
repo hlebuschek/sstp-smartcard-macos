@@ -5,6 +5,7 @@ import SwiftUI
 final class TunnelModel: ObservableObject {
     @Published var status = TunnelStatus.idle
     @Published var daemonReachable = false
+    @Published var daemonBuild: String?
     @Published var tokens: [TokenDescription] = []
     @Published var message: String?
     @Published var busy = false
@@ -21,6 +22,24 @@ final class TunnelModel: ObservableObject {
 
     var tokenWarning: String? {
         tokens.compactMap(\.pinWarning).first
+    }
+
+    /// The build this app was shipped with, absent when running from a checkout
+    /// rather than a bundle.
+    private let bundledBuild = Bundle.main.object(
+        forInfoDictionaryKey: "SSTPBuild"
+    ) as? String
+
+    /// Whether the daemon is running code from a different build of the app.
+    ///
+    /// install copies the payload to /usr/local/libexec, so dragging in a new
+    /// version leaves the old daemon in place: the card is read by code that
+    /// predates the app, and a token the app supports can stay invisible.
+    /// A daemon old enough to predate the stamp reports none at all, which is
+    /// the very case worth catching, so a missing stamp counts as a mismatch.
+    var serviceOutdated: Bool {
+        guard daemonReachable, let bundledBuild else { return false }
+        return daemonBuild != bundledBuild
     }
 
     var canConnect: Bool {
@@ -124,11 +143,12 @@ final class TunnelModel: ObservableObject {
         let thread = Thread { [weak self] in
             while true {
                 do {
-                    let (connection, initial) = try DaemonClient.subscribe()
+                    let (connection, initial, build) = try DaemonClient.subscribe()
                     Task { @MainActor [weak self] in
                         self?.events = connection
                         self?.daemonReachable = true
                         self?.status = initial
+                        self?.daemonBuild = build
                     }
                     while true {
                         let line = try connection.read()
@@ -142,6 +162,7 @@ final class TunnelModel: ObservableObject {
                     Task { @MainActor [weak self] in
                         self?.daemonReachable = false
                         self?.events = nil
+                        self?.daemonBuild = nil
                     }
                     // The daemon may simply not be up yet; keep trying quietly.
                     Thread.sleep(forTimeInterval: 3)

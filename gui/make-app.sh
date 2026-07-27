@@ -60,6 +60,19 @@ ditto "$RUNTIME" "$APP/Contents/Resources/python"
 ditto ../sstp "$APP/Contents/Resources/sstp"
 find "$APP/Contents/Resources/sstp" -name '__pycache__' -type d -prune -exec rm -rf {} +
 
+# The stamp is a digest of the sources rather than a version number: what the
+# interface has to detect is a daemon left over from a different build, and
+# nobody remembers to bump a version before rebuilding.
+BUILD_ID="$(git describe --always --dirty 2>/dev/null || echo nogit)-$(
+    find ../sstp -name '*.py' ! -name build.py | sort |
+        xargs shasum | shasum | cut -c1-12
+)"
+cat > "$APP/Contents/Resources/sstp/build.py" <<STAMP
+"""Written by make-app.sh; see the checked-in build.py for what this is for."""
+
+BUILD = "$BUILD_ID"
+STAMP
+
 # The GUI runs this to install the daemon, and it is also the way to reach the
 # command line inside the bundle. $0 rather than a baked-in path, so the app
 # keeps working wherever it is dragged.
@@ -76,7 +89,7 @@ swiftc -O -o build/make-icon icon.swift
 ./build/make-icon build/SSTP.iconset
 iconutil -c icns build/SSTP.iconset -o "$APP/Contents/Resources/SSTP.icns"
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -88,6 +101,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleIconFile</key>        <string>SSTP</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>
     <key>CFBundleShortVersionString</key> <string>0.1</string>
+    <key>SSTPBuild</key>               <string>$BUILD_ID</string>
     <key>LSMinimumSystemVersion</key>  <string>14.0</string>
 </dict>
 </plist>

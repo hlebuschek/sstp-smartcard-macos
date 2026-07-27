@@ -10,6 +10,11 @@ struct MenuView: View {
             header
             Divider()
 
+            if model.serviceOutdated {
+                serviceOutdated
+                Divider()
+            }
+
             if !model.daemonReachable {
                 daemonMissing
             } else if model.status.isConnected {
@@ -74,6 +79,22 @@ struct MenuView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Button("Установить службу") { model.installService() }
                 .keyboardShortcut(.defaultAction)
+                .disabled(model.busy)
+        }
+    }
+
+    private var serviceOutdated: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("Служба устарела", systemImage: "exclamationmark.triangle")
+                .font(.callout)
+                .foregroundStyle(.orange)
+            Text("Фоновая служба работает на коде предыдущей версии приложения: "
+                 + "она ставится отдельной копией и сама не обновляется. Пока её "
+                 + "не переустановить, часть токенов может не определяться.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Обновить службу") { model.installService() }
                 .disabled(model.busy)
         }
     }

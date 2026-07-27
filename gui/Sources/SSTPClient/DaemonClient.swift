@@ -137,6 +137,7 @@ private struct ErrorReply: Decodable {
 
 private struct StatusReply: Decodable {
     let status: TunnelStatus
+    let build: String?
 }
 
 private struct TokensReply: Decodable {
@@ -197,10 +198,14 @@ enum DaemonClient {
     }
 
     /// Open a long-lived connection that receives state broadcasts.
-    static func subscribe(path: String = defaultSocketPath) throws -> (DaemonConnection, TunnelStatus) {
+    ///
+    /// The reply also carries the daemon's build stamp, which is how the
+    /// interface learns it is talking to a copy of the code older than its own.
+    static func subscribe(path: String = defaultSocketPath)
+        throws -> (DaemonConnection, TunnelStatus, String?) {
         let connection = try DaemonConnection(path: path, timeout: 0)
         try connection.write(["command": "subscribe"])
         let reply = try decode(StatusReply.self, from: try connection.read())
-        return (connection, reply.status)
+        return (connection, reply.status, reply.build)
     }
 }

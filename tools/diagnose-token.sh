@@ -294,6 +294,12 @@ if [ -n "$APP" ]; then
         fi
     fi
 fi
+printf '\n$ build stamp of each copy (these must match)\n'
+for copy in "$INSTALLED/sstp/build.py" "${APP:+$APP/Contents/Resources/sstp/build.py}"; do
+    [ -f "$copy" ] || continue
+    printf '  %s: %s\n' "$copy" "$(grep '^BUILD' "$copy" | cut -d'"' -f2)"
+done
+
 printf '\n$ modules known to each copy\n'
 for copy in "$INSTALLED/sstp/token.py" "${APP:+$APP/Contents/Resources/sstp/token.py}"; do
     [ -f "$copy" ] || continue
@@ -316,14 +322,24 @@ try:
 except OSError as exc:
     print(f"cannot reach the daemon: {exc}")
     raise SystemExit(0)
-sock.sendall(json.dumps({"command": "tokens"}).encode() + b"\n")
 buffer = b""
-while b"\n" not in buffer:
-    chunk = sock.recv(65536)
-    if not chunk:
-        break
-    buffer += chunk
-reply = json.loads(buffer.split(b"\n")[0] or b"{}")
+
+
+def ask(command):
+    global buffer
+    sock.sendall(json.dumps({"command": command}).encode() + b"\n")
+    while b"\n" not in buffer:
+        chunk = sock.recv(65536)
+        if not chunk:
+            break
+        buffer += chunk
+    line, _, buffer = buffer.partition(b"\n")
+    return json.loads(line or b"{}")
+
+
+status = ask("status")
+print(f"daemon build: {status.get('build', 'not reported — predates the stamp')}")
+reply = ask("tokens")
 if not reply.get("ok"):
     print(f"daemon replied with an error: {reply.get('error')}")
 else:

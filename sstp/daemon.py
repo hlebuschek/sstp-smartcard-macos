@@ -14,6 +14,7 @@ import threading
 import time
 
 from . import ipc, log, net
+from .build import BUILD
 from .session import Config, Session
 from .token import Token, TokenError, discover_modules
 
@@ -87,10 +88,10 @@ class Daemon:
     # --------------------------------------------------------------- commands
 
     def _command_ping(self, request: dict) -> dict:
-        return {"ok": True, "pong": True}
+        return {"ok": True, "pong": True, "build": BUILD}
 
     def _command_status(self, request: dict) -> dict:
-        return {"ok": True, "status": self._status()}
+        return {"ok": True, "build": BUILD, "status": self._status()}
 
     def _command_tokens(self, request: dict) -> dict:
         # Every installed middleware is asked, because each one only sees its
@@ -217,7 +218,7 @@ class Daemon:
     def _command_subscribe(self, request: dict, channel: ipc.Channel) -> dict:
         with self._lock:
             self._subscribers.append(channel)
-        return {"ok": True, "status": self._status()}
+        return {"ok": True, "build": BUILD, "status": self._status()}
 
     # ---------------------------------------------------------------- session
 
