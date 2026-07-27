@@ -29,6 +29,11 @@ sw_vers
 printf 'hardware arch: %s\n' "$(uname -m)"
 sysctl -n machdep.cpu.brand_string 2>/dev/null
 printf 'running under Rosetta: %s\n' "$(sysctl -n sysctl.proc_translated 2>/dev/null || echo n/a)"
+printf 'user: %s\n' "$(id -un)"
+printf 'groups: %s\n' "$(id -Gn)"
+# The control socket is root:admin 0660; a standard account cannot open it at
+# all, and the interface then looks exactly like a card that is not detected.
+id -Gn | grep -qw admin && printf 'admin group: yes\n' || printf 'admin group: NO — cannot reach the daemon socket\n'
 
 section "the app bundle"
 APP=""
@@ -270,5 +275,65 @@ printf '\n$ daemon registered with launchd\n'
 launchctl print system/local.sstp.daemon 2>&1 | head -20
 printf '\n$ tail of /var/log/sstp.log\n'
 tail -n 60 /var/log/sstp.log 2>&1
+
+section "daemon code (a copy, not the bundle)"
+# install snapshots the bundle into /usr/local/libexec/sstp and launchd keeps
+# running that snapshot; replacing the app afterwards leaves the interface on
+# the old code while the bundled command line already uses the new one.
+INSTALLED=/usr/local/libexec/sstp
+printf '\n$ installed payload\n'
+ls -l "$INSTALLED/sstp/token.py" 2>&1
+if [ -n "$APP" ]; then
+    printf '\n$ bundle payload for comparison\n'
+    ls -l "$APP/Contents/Resources/sstp/token.py" 2>&1
+    if [ -f "$INSTALLED/sstp/token.py" ]; then
+        if [ "$APP/Contents/Resources/sstp/token.py" -nt "$INSTALLED/sstp/token.py" ]; then
+            printf '\nSTALE: the app is newer than the installed daemon — rerun install\n'
+        else
+            printf '\nthe installed daemon is not older than the app\n'
+        fi
+    fi
+fi
+printf '\n$ modules known to each copy\n'
+for copy in "$INSTALLED/sstp/token.py" "${APP:+$APP/Contents/Resources/sstp/token.py}"; do
+    [ -f "$copy" ] || continue
+    printf '  %s\n' "$copy"
+    grep -o '"/[^"]*"' "$copy" | grep -i pkcs11 | sed 's/^/    /'
+done
+
+section "the daemon's own answer (this is the path the GUI uses)"
+if [ -z "$PY" ]; then
+    printf 'no interpreter available, skipping\n'
+elif [ ! -S /var/run/sstp.sock ]; then
+    printf 'the control socket does not exist — the daemon is not installed\n'
+else
+    limit 60 "$PY" - <<'PYTHON' 2>&1
+import json, socket
+try:
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(45)
+    sock.connect("/var/run/sstp.sock")
+except OSError as exc:
+    print(f"cannot reach the daemon: {exc}")
+    raise SystemExit(0)
+sock.sendall(json.dumps({"command": "tokens"}).encode() + b"\n")
+buffer = b""
+while b"\n" not in buffer:
+    chunk = sock.recv(65536)
+    if not chunk:
+        break
+    buffer += chunk
+reply = json.loads(buffer.split(b"\n")[0] or b"{}")
+if not reply.get("ok"):
+    print(f"daemon replied with an error: {reply.get('error')}")
+else:
+    tokens = reply.get("tokens", [])
+    print(f"daemon sees {len(tokens)} token(s)")
+    for token in tokens:
+        print(f"  {token['label']} serial={token['serial']} via {token['module']}")
+        for cert in token.get("certificates", []):
+            print(f"    {cert.get('subject')}")
+PYTHON
+fi
 
 printf '\n===== end of report =====\n'
