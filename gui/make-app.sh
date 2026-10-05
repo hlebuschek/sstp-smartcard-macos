@@ -8,13 +8,22 @@ set -eu
 
 cd "$(dirname "$0")"
 
+# ARCH=x86_64 ./make-app.sh builds for Intel Macs (macOS 12+); the x86_64
+# Python runs under Rosetta during the build, so pip picks Intel wheels.
+ARCH="${ARCH:-$(uname -m)}"
+case "$ARCH" in
+    arm64|aarch64) ARCH=arm64; PBS_ARCH=aarch64 ;;
+    x86_64)        PBS_ARCH=x86_64 ;;
+    *) echo "unsupported ARCH '$ARCH' (arm64 or x86_64)" >&2; exit 1 ;;
+esac
+
 PYTHON_TAG=20260718
 PYTHON_VERSION=3.12.13
-PYTHON_ARCHIVE="cpython-$PYTHON_VERSION+$PYTHON_TAG-aarch64-apple-darwin-install_only_stripped.tar.gz"
+PYTHON_ARCHIVE="cpython-$PYTHON_VERSION+$PYTHON_TAG-$PBS_ARCH-apple-darwin-install_only_stripped.tar.gz"
 PYTHON_URL="https://github.com/astral-sh/python-build-standalone/releases/download/$PYTHON_TAG/$PYTHON_ARCHIVE"
 
-APP="${1:-build/SSTP VPN.app}"
-RUNTIME=build/runtime
+APP="${1:-build/$ARCH/SSTP VPN.app}"
+RUNTIME=build/runtime-$ARCH
 STAMP="$RUNTIME/.stamp"
 WANTED="$PYTHON_TAG $(shasum ../requirements.txt | cut -d' ' -f1)"
 
@@ -50,11 +59,12 @@ fi
 
 # --------------------------------------------------------------------- app
 
-swift build -c release
+swift build -c release --arch "$ARCH"
+BIN="$(swift build -c release --arch "$ARCH" --show-bin-path)"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp .build/release/SSTPClient "$APP/Contents/MacOS/SSTP"
+cp "$BIN/SSTPClient" "$APP/Contents/MacOS/SSTP"
 
 ditto "$RUNTIME" "$APP/Contents/Resources/python"
 ditto ../sstp "$APP/Contents/Resources/sstp"
@@ -102,7 +112,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <key>CFBundlePackageType</key>     <string>APPL</string>
     <key>CFBundleShortVersionString</key> <string>0.1</string>
     <key>SSTPBuild</key>               <string>$BUILD_ID</string>
-    <key>LSMinimumSystemVersion</key>  <string>14.0</string>
+    <key>LSMinimumSystemVersion</key>  <string>12.0</string>
 </dict>
 </plist>
 PLIST
@@ -110,9 +120,16 @@ PLIST
 codesign --force --sign - "$APP/Contents/MacOS/SSTP" >/dev/null 2>&1 ||
     echo "warning: ad-hoc signing failed; the app will still run" >&2
 
-ZIP="build/SSTP-VPN.zip"
-rm -f "$ZIP"
-ditto -c -k --keepParent --sequesterRsrc "$APP" "$ZIP"
+# The zip ships with install-and-check.sh: it moves the app to /Applications,
+# strips quarantine and writes a diagnostic report, so remote users can be
+# walked through installation with a single command.
+ZIP="build/SSTP-VPN-$ARCH.zip"
+STAGE="build/dist-$ARCH"
+rm -rf "$STAGE" "$ZIP"
+mkdir -p "$STAGE"
+ditto "$APP" "$STAGE/$(basename "$APP")"
+install -m 755 install-and-check.sh "$STAGE/"
+ditto -c -k --sequesterRsrc "$STAGE" "$ZIP"
 
 echo "built $APP ($(du -sh "$APP" | cut -f1))"
 echo "shareable: $ZIP ($(du -h "$ZIP" | cut -f1))"
