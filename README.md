@@ -51,8 +51,8 @@ Root нужен ради `utun`, таблицы маршрутов и `networkse
 
 ## Установка
 
-Готовый архив лежит в [релизах](../../releases). Собран для Apple Silicon и
-подписан ad-hoc, без Apple Developer ID.
+Готовый архив лежит в [релизах](../../releases): отдельно для Apple Silicon
+и для Intel (macOS 12+). Подписан ad-hoc, без Apple Developer ID.
 
 1. Распаковать и перетащить `SSTP VPN.app` в «Программы».
 2. Снять карантин — иначе Gatekeeper не пустит приложение без подписи Apple.
@@ -127,13 +127,16 @@ sudo "$SSTP" disconnect         # вернуть маршруты и DNS
 относимый рантайм сам.
 
 ```sh
-gui/make-app.sh
+gui/make-app.sh                 # под архитектуру сборочной машины
+ARCH=x86_64 gui/make-app.sh     # под Intel (работает и на Apple Silicon:
+                                # pip ходит через Rosetta за Intel-колёсами)
 ```
 
 Скрипт скачивает [python-build-standalone](https://github.com/astral-sh/python-build-standalone),
 ставит в него `requirements.txt`, кладёт рядом пакет `sstp`, собирает
-приложение и упаковывает всё в `gui/build/SSTP VPN.app` и `SSTP-VPN.zip`.
-Рантайм кэшируется в `gui/build/runtime`, поэтому повторные сборки быстрые.
+приложение и упаковывает всё в `gui/build/<арх>/SSTP VPN.app` и
+`SSTP-VPN-<арх>.zip`. Рантайм кэшируется в `gui/build/runtime-<арх>`,
+поэтому повторные сборки быстрые.
 
 Для работы с ядром напрямую хватит обычного venv:
 
@@ -144,11 +147,13 @@ sudo .venv/bin/python -m sstp list
 
 ## Ограничения
 
-- Только **Apple Silicon**: колесо `cryptography` в сборке arm64-only.
+- Минимум **macOS 12**. В Intel-сборке `cryptography` закреплена на 46.0.3 —
+  последней версии с колесом под x86_64.
 - Нет подписи Apple Developer ID и нотаризации — отсюда ручное снятие карантина.
 - Драйвер PKCS#11 не входит в комплект.
 - Проверено на macOS 15 против Windows RRAS с шифрсьютом
-  `ECDHE_RSA_AES_256_GCM_SHA384`.
+  `ECDHE_RSA_AES_256_GCM_SHA384`; Intel-сборка на живом macOS 12 пока не
+  проверялась.
 
 ## Безопасность
 

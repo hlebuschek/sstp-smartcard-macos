@@ -1,4 +1,9 @@
 cffi==2.1.0
-cryptography==49.0.0
+# cryptography dropped Intel macOS wheels after 46.x; 46.0.3 is the last
+# release that still ships a universal2 wheel, so the x86_64 build pins it.
+cryptography==49.0.0; platform_machine != "x86_64"
+cryptography==46.0.3; platform_machine == "x86_64"
 pycparser==3.0
-PyKCS11==1.5.18
+# 1.5.19+ is required to build with SWIG >= 4.3, which dropped the Python 2
+# compatibility defines the old pykcs11.i relied on.
+PyKCS11==1.5.20

@@ -6,3 +6,4 @@ __pycache__/
 
 gui/.build/
 gui/build/
+.DS_Store
